@@ -11,6 +11,7 @@ const argFilePath = process.argv[2];
 
 let totalEnrollmentRows = 0;
 let enrollmentsAfterFirstWeekOfSession = 0;
+let monthlyEnrollmentCounts = {};
 
 /**
  * Define a promise based helper function for reading a .csv file.
@@ -125,12 +126,20 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
     // Tokenize inner text by splitting on spaces and periods.
     const tokens = inner.split(/[ .]+/).filter(token => token.trim() !== '');
   
+    // Count numeric tokens (i.e. day numbers).
+    const dayTokens = tokens.filter(token => !monthNames[token] && !isNaN(parseInt(token, 10)));
+    if (dayTokens.length <= 3) {
+        if (!blacklistedSessions.includes(sessionStr)) {
+            blacklistedSessions.push(sessionStr);
+        }
+        return [];
+    }
+  
     // Check for special session pattern:
     // Exactly 5 tokens where the first is a valid month and the remaining 4 are day numbers.
     if (tokens.length === 5 && monthNames[tokens[0]]) {
         const dayNumbers = tokens.slice(1).map(token => parseInt(token, 10));
         if (dayNumbers.every(num => !isNaN(num))) {
-            // Verify that the day numbers are consecutive.
             let isConsecutive = true;
             for (let i = 1; i < dayNumbers.length; i++) {
                 if (dayNumbers[i] !== dayNumbers[i - 1] + 1) {
@@ -139,11 +148,9 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
                 }
             }
             if (isConsecutive) {
-                // If not already in the blacklist, add this session string.
                 if (!blacklistedSessions.includes(sessionStr)) {
                     blacklistedSessions.push(sessionStr);
                 }
-                // Exclude special sessions from further processing.
                 return [];
             }
         }
@@ -160,13 +167,14 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
         } else {
             // Otherwise, treat token as a day number.
             const day = parseInt(token, 10);
-            if (!isNaN(day) && currentMonth !== null) {
-                // Determine the session year: if the enrollMonth is greater than the session's month, the session falls in the next year.
+                if (!isNaN(day) && currentMonth !== null) {
+                // Determine the session year:
+                // If enrollMonth is greater than the session's month, then assume the session is next year.
                 let sessionYear = enrollYear;
                 if (enrollMonth > currentMonth) {
                     sessionYear = enrollYear + 1;
                 }
-                dates.push({ year: sessionYear, month: currentMonth, day: day });
+                dates.push({ year: sessionYear, month: currentMonth, day });
             }
         }
     });
@@ -199,59 +207,94 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
     );
     
     // Go on to compile the number of enrollments made after the first week of the session.
-    await readCSVFile(argFilePath,
+    await readCSVFile(
+        argFilePath,
         (row) => {
             totalEnrollmentRows++;
-    
-            // Expecting columns "Enroll Date" and "Session"
+        
+            // Expecting columns "Enroll Date", "Session", and "Class"
             const enrollDateStr = row['Enroll Date'];
             const sessionStr = row['Session'];
-
-            // If this is a blacklisted session, ignore it
+            const classCategory = row['Class'] || 'Unknown';
+        
+            // If this is a blacklisted session, ignore it.
             if (isBlacklisted(sessionStr)) {
                 return;
             }
-            
+        
             // Only proceed if both columns exist.
             if (!enrollDateStr || !sessionStr) return;
-            
+        
             // Parse the enrollment date (assumes MM/DD/YYYY)
             const dateParts = enrollDateStr.split('/');
             if (dateParts.length !== 3) return;
-            
+        
             const month = parseInt(dateParts[0], 10);
             const day = parseInt(dateParts[1], 10);
             let year = parseInt(dateParts[2], 10);
-            
+        
             // Validate the parsed numbers.
             if (isNaN(month) || isNaN(day)) return;
-            
+        
             // Convert month number to month name.
+            // Assumes monthNameStrings is a global mapping: {1: "January", 2: "February", ...}
             const enrollMonthName = monthNameStrings[month];
-            
-            // Check if the "Session" column contains the enrollment month (case insensitive).
+        
+            // Check if the "Session" column starts with the enrollment month (case insensitive).
             if (!sessionStr.toLowerCase().startsWith(enrollMonthName.toLowerCase())) {
                 // Skip this row if the month doesn't match the session title.
                 return;
             }
-
-            // Estimate the year of the session
+        
+            // Estimate the year of the session.
+            // Assumes monthNames is a mapping like { "January": 1, "February": 2, ... }
             const sessionMonthIndex = monthNames[enrollMonthName];
             if (month > sessionMonthIndex) {
                 year++;
             }
-            
-            // Increment the counter if the enrollment day is after the first week
-            const firstWeekThreshold = getFirstClassDay(month, year) + 7;
+        
+            // Determine the enrollment threshold: first class day + 7 days.
+            const firstClassDay = getFirstClassDay(month, year);
+            // If no first class day exists, skip this row.
+            if (firstClassDay === null) return;
+            const firstWeekThreshold = firstClassDay + 7;
             if (day > firstWeekThreshold) {
-                // console.log(enrollDateStr, "-", sessionStr, "-", firstWeekThreshold);
                 enrollmentsAfterFirstWeekOfSession++;
+        
+                // Build a key for the specific year-month.
+                const key = `${year}-${month}`;
+                // Ensure an object exists for this key.
+                if (!monthlyEnrollmentCounts[key]) {
+                monthlyEnrollmentCounts[key] = {};
+                }
+                // Initialize the class counter if needed.
+                if (!monthlyEnrollmentCounts[key][classCategory]) {
+                monthlyEnrollmentCounts[key][classCategory] = 0;
+                }
+                monthlyEnrollmentCounts[key][classCategory]++;
             }
         },
         () => {
+            // Log overall enrollments statistics.
             const factor = `${enrollmentsAfterFirstWeekOfSession} / ${totalEnrollmentRows}`;
-            const decimal = enrollmentsAfterFirstWeekOfSession / totalEnrollmentRows * 100;
-            console.log(`Enrollments after the first week of session: ${factor} (${decimal}%)`);
+            const decimal = (enrollmentsAfterFirstWeekOfSession / totalEnrollmentRows) * 100;
+            console.log(
+                `Enrollments after the first week of session: ${factor} (${decimal.toFixed(2)}%)`
+            );
+        
+            // Optionally, log the nested monthly enrollment counts.
+            console.log('Monthly Enrollment Counts (by Class):', monthlyEnrollmentCounts);
+        
+            // If desired, compute overall monthly totals and box-and-whisker statistics.
+            const overallMonthlyTotals = Object.entries(monthlyEnrollmentCounts).map(
+                ([key, classCounts]) => {
+                const total = Object.values(classCounts).reduce((a, b) => a + b, 0);
+                return { key, total };
+                }
+            );
+            console.log('Overall Monthly Totals:', overallMonthlyTotals);
+        
+            // Here you could further compute min, max, quartiles, etc., based on overallMonthlyTotals.
         }
     );
 })();
