@@ -8,6 +8,7 @@ if (process.argv.length < 3) {
 }
 
 const argFilePath = process.argv[2];
+const enrollmentGracePeriod = Number(process.argv[3] || 7);
 
 let totalEnrollmentRows = 0;
 let enrollmentsAfterFirstWeekOfSession = 0;
@@ -253,11 +254,11 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
                 year++;
             }
         
-            // Determine the enrollment threshold: first class day + 7 days.
+            // Determine the enrollment threshold: first class day + "enrollmentGracePeriod".
             const firstClassDay = getFirstClassDay(month, year);
             // If no first class day exists, skip this row.
             if (firstClassDay === null) return;
-            const firstWeekThreshold = firstClassDay + 7;
+            const firstWeekThreshold = firstClassDay + enrollmentGracePeriod;
             if (day > firstWeekThreshold) {
                 enrollmentsAfterFirstWeekOfSession++;
         
