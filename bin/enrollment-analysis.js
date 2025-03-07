@@ -281,8 +281,6 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
             console.log(
                 `Enrollments after the first week of session: ${factor} (${decimal.toFixed(2)}%)`
             );
-        
-            // Optionally, log the nested monthly enrollment counts.
             console.log('Monthly Enrollment Counts (by Class):', monthlyEnrollmentCounts);
         
             // If desired, compute overall monthly totals and box-and-whisker statistics.
@@ -293,8 +291,6 @@ function parseSessionDates(sessionStr, enrollYear, enrollMonth) {
                 }
             );
             console.log('Overall Monthly Totals:', overallMonthlyTotals);
-        
-            // Here you could further compute min, max, quartiles, etc., based on overallMonthlyTotals.
         }
     );
 })();
